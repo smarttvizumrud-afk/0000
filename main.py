@@ -1,93 +1,60 @@
 import os
 import asyncio
-import logging
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.client.session.aiohttp import AiohttpSession
-from yt_dlp import YoutubeDL
+import yt_dlp
 
-# Настройка логирования, чтобы видеть ошибки в Logs
-logging.basicConfig(level=logging.INFO)
-
-TOKEN = "8682838491:AAG6BwrVEV8jaBi4Iw8Cua1Vebc2t_meOWw"
-
-# Используем сессию для более стабильного соединения
-session = AiohttpSession()
-bot = Bot(token=TOKEN, session=session)
+# Твой токен (Render сам подставит его из Environment Variables, если ты его там указал)
+# Либо просто вставь его сюда в кавычки вместо os.getenv
+TOKEN = os.getenv("BOT_TOKEN") 
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-progress_data = {}
-
-def my_hook(d):
-    chat_id = d.get('info_dict', {}).get('chat_id')
-    if chat_id and d['status'] == 'downloading':
-        p = d.get('_percent_str', '0%').strip()
-        progress_data[chat_id] = f"⏳ Загрузка: {p}"
-
+# Настройки скачивания с куками
 YDL_OPTIONS = {
-    'format': 'best[ext=mp4][height<=720]/best[ext=mp4]',
-    'outtmpl': 'downloads/%(title)s.%(ext)s',
+    'format': 'best',
+    'cookiefile': 'cookies.txt',  # Используем твой файл с куками
+    'outtmpl': 'video.mp4',
     'noplaylist': True,
-    'quiet': True,
-    'no_warnings': True,
-    'nocheckcertificate': True,
-    'default_search': 'ytsearch1:',
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
 }
 
 @dp.message(Command("start"))
-async def start_cmd(message: types.Message):
-    await message.answer("🚀 Бот запущен на сервере! Напиши название канала.")
-
-@dp.message(F.text.lower().contains("где видео"))
-async def status_check(message: types.Message):
-    res = progress_data.get(message.chat.id, "🔍 Пока ничего не качаю.")
-    await message.reply(res)
+async def start_handler(message: types.Message):
+    await message.answer("👋 Привет, Ануар! Пришли мне ссылку на YouTube, и я скачаю видео без капчи.")
 
 @dp.message()
-async def handle_message(message: types.Message):
-    if "где видео" in message.text.lower():
-        return
+async def download_video(message: types.Message):
+    if "youtube.com" in message.text or "youtu.be" in message.text:
+        msg = await message.answer("⏳ Начинаю скачивание, подожди...")
+        try:
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                ydl.download([message.text])
+            
+            video = types.FSInputFile("video.mp4")
+            await bot.send_video(message.chat.id, video)
+            os.remove("video.mp4")
+            await msg.delete()
+        except Exception as e:
+            await message.answer(f"❌ Ошибка: {str(e)}")
+    else:
+        await message.answer("Пришли мне рабочую ссылку на YouTube.")
 
-    query = message.text
-    chat_id = message.chat.id
-    msg = await message.answer(f"🔎 Ищу: {query}...")
-
-    try:
-        if not os.path.exists('downloads'):
-            os.makedirs('downloads')
-
-        loop = asyncio.get_event_loop()
-        def run_dl():
-            opts = YDL_OPTIONS.copy()
-            opts['progress_hooks'] = [my_hook]
-            with YoutubeDL(opts) as ydl:
-                return ydl.extract_info(query, download=True, extra_info={'chat_id': chat_id})
-
-        info = await loop.run_in_executor(None, run_dl)
-        video_data = info['entries'][0] if 'entries' in info else info
-        filename = ydl.prepare_filename(video_data)
-        
-        if os.path.exists(filename):
-            filesize = os.path.getsize(filename) / (1024 * 1024)
-            if filesize > 50:
-                await msg.edit_text(f"⚠️ Видео слишком тяжелое ({filesize:.1f}МБ). Лимит ТГ — 50МБ.")
-            else:
-                video_file = types.FSInputFile(filename)
-                await bot.send_video(chat_id, video=video_file, caption=f"✅ {video_data.get('title')}")
-                await msg.delete()
-            os.remove(filename)
-
-    except Exception as e:
-        await message.answer(f"❌ Ошибка YouTube: {str(e)[:100]}...")
+# Мини-сервер для Render (чтобы не было ошибки Port Scan Timeout)
+async def keep_alive():
+    import http.server
+    import socketserver
+    PORT = int(os.environ.get("PORT", 10000))
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        httpd.serve_forever()
 
 async def main():
-    # Запускаем бота с пропуском накопившихся сообщений
-    await bot.delete_webhook(drop_pending_updates=True)
+    # Запускаем "пустой" сервер в фоне для Render
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, lambda: asyncio.run(keep_alive()))
+    
+    # Запускаем бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        print(f"КРИТИЧЕСКАЯ ОШИБКА: {e}")
+    asyncio.run(main())
