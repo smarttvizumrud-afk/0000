@@ -8,7 +8,7 @@ import yt_dlp
 
 # --- НАСТРОЙКИ ---
 # Вставил твой токен прямо сюда, чтобы Render его точно увидел
-TOKEN = "8682838491:AAG6BwrVEV8jaBI4Iw8Cua1Vebc2t_meOWw"
+TOKEN = "8682838491:AAH8AsAxsYPD-WFBXGBlvKDkhefuDj9NTMQ"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
